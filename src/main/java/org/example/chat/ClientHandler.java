@@ -1,55 +1,93 @@
 package org.example.chat;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.*;
 import java.net.Socket;
-import java.util.Scanner;
+import java.util.Map;
 
-class ChatClient {
-    private static final String SERVER_ADDRESS = "localhost";
-    private static final int SERVER_PORT = 12345;
+class ClientHandler implements Runnable {
+    private static final Logger logger = LoggerFactory.getLogger(ClientHandler.class);
 
-    public static void main(String[] args) {
-        try (Socket socket = new Socket(SERVER_ADDRESS, SERVER_PORT);
-             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-             PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-             Scanner scanner = new Scanner(System.in)) {
+    private final Socket socket;
+    private String nickname;
+    private BufferedReader in;
+    private PrintWriter out;
 
-            System.out.println(in.readLine());
-            String nickname = scanner.nextLine();
-            out.println(nickname);
+    public ClientHandler(Socket socket) {
+        this.socket = socket;
+    }
 
-            new Thread(() -> {
-                String msg;
-                try {
-                    while ((msg = in.readLine()) != null) {
-                        System.out.println(msg);
-                    }
-                } catch (IOException e) {
-                    System.out.println("Соединение закрыто.");
-                }
-            }).start();
+    public void run() {
+        try {
+            in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            out = new PrintWriter(socket.getOutputStream(), true);
 
-            while (true) {
-                System.out.println("Выберите тип сообщения: 1 - личное, 2 - широковещательное");
-                String type = scanner.nextLine();
-                if (type.equals("1")) {
-                    System.out.println("Введите псевдоним получателя (используй /users, чтобы просмотреть список)::");
-                    String recipient = scanner.nextLine();
-                    if (recipient.equals("/users")) {
-                        out.println("/users");
-                        continue;
-                    }
-                    System.out.println("Введите свое сообщение:");
-                    String msg = scanner.nextLine();
-                    out.println("@" + recipient + ":" + msg);
-                } else if (type.equals("2")) {
-                    System.out.println("Введите свое сообщение:");
-                    String msg = scanner.nextLine();
-                    out.println(msg);
+            out.println("Введите свое имя/никнейм:");
+            nickname = in.readLine();
+
+            if (nickname == null || nickname.isBlank()) {
+                socket.close();
+                return;
+            }
+
+            ChatServer.clients.put(nickname, this);
+            logger.info("{} подключен", nickname);
+
+            String message;
+            while ((message = in.readLine()) != null) {
+                handleMessage(message);
+            }
+
+        } catch (IOException e) {
+            logger.warn("Связь с {} потеряна.", nickname);
+        } finally {
+            try {
+                socket.close();
+            } catch (IOException e) {
+                logger.error("Ошибка закрытия сокета для {}", nickname);
+            }
+            ChatServer.clients.remove(nickname);
+            logger.info("{} отключен", nickname);
+        }
+    }
+
+    private void handleMessage(String message) {
+        if (message.equals("/users")) {
+            send("Подключенные пользователи: " + getConnectedUsers());
+            return;
+        }
+
+        if (message.startsWith("@")) {
+            int colonIndex = message.indexOf(":");
+            if (colonIndex != -1) {
+                String recipient = message.substring(1, colonIndex).trim();
+                String text = message.substring(colonIndex + 1).trim();
+
+                ClientHandler target = ChatServer.clients.get(recipient);
+                if (target != null) {
+                    target.send("[Приватно] " + nickname + ": " + text);
+                    logger.info("Частное сообщение {} к {}: {}", nickname, recipient, text);
+                } else {
+                    send("Пользователь не найден: " + recipient);
                 }
             }
-        } catch (IOException e) {
-            System.err.println("Ошибка клиента: " + e.getMessage());
+        } else {
+            for (Map.Entry<String, ClientHandler> entry : ChatServer.clients.entrySet()) {
+                if (!entry.getKey().equals(nickname)) {
+                    entry.getValue().send("[Трансляция] " + nickname + ": " + message);
+                }
+            }
+            logger.info("Трансляция для {}: {}", nickname, message);
         }
+    }
+
+    public void send(String message) {
+        out.println(message);
+    }
+
+    public static String getConnectedUsers() {
+        return String.join(", ", ChatServer.clients.keySet());
     }
 }

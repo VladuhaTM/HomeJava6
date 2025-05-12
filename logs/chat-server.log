@@ -14,3 +14,4 @@
 15:22:33 [Thread-0] INFO  org.example.chat.ClientHandler - бебра бебра подключен
 15:22:41 [Thread-0] INFO  org.example.chat.ClientHandler - Трансляция для бебра бебра: люблю вареники
 15:22:47 [Thread-0] INFO  org.example.chat.ClientHandler - Трансляция для бебра бебра: вареники
+17:11:22 [main] INFO  org.example.chat.ChatServer - Консольный чат запущен с портом 12345
